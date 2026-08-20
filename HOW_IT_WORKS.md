@@ -13,7 +13,7 @@ final assistant text ─► optional text model ──► completed outcome
 Pi and tool events ───► activity reducer ─────► live activity
 process lifecycle ────► tracked process map ─► background status
                                                    │
-                                                   └──► throttled two-row widget
+                                                   └──► throttled adaptive widget
 ```
 
 A model is useful for resolving conversational shorthand and tightening a final
@@ -34,7 +34,8 @@ The implementation follows these rules:
 7. Report completion only after `agent_settled`, `ctx.isIdle()`, and no tracked
    process remains.
 8. Summarize a completed turn from bounded assistant text, never tool results.
-9. Render exactly two width-safe rows.
+9. Keep the request and intermediate activity to one row each; let only a
+   completed outcome wrap, with a three-row cap.
 10. Clear timers, pending requests, and the widget when the session runtime ends.
 
 ## Source map
@@ -46,7 +47,7 @@ The implementation follows these rules:
 | `src/conversation.ts` | Transcript text extraction, one-line normalization, clipping, and local fallback |
 | `src/request-interpreter.ts` | Model lookup, authentication, bounded request and outcome prompts, and nested completion |
 | `src/activity.ts` | Pure activity reducer, tool and managed-process tracking, and display text |
-| `src/widget.ts` | Two-row renderer and trailing render throttle |
+| `src/widget.ts` | Conditional outcome wrapping and trailing render throttle |
 | `test/*.test.ts` | Unit and mocked lifecycle coverage |
 
 Pi loads `src/index.ts` directly from the `pi.extensions` entry in
@@ -146,9 +147,8 @@ finish late, but its result cannot replace current state.
 `message_end` retains the latest assistant text from the current agent run.
 Once `agent_settled` reports an idle agent and no managed process remains, that
 text becomes the local outcome fallback. It is collapsed and clipped to 240
-characters, then shown as
-`Done: <outcome>`. If there is no assistant text, the line stays
-`Done — waiting for you`.
+characters, then shown as `Done: <outcome>`. If there is no assistant text, the
+line stays `Done — waiting for you`.
 
 When a model is configured, the extension sends one more bounded request with:
 
@@ -268,10 +268,17 @@ create a fresh runtime on the next `session_start`.
 
 The renderer:
 
-- returns one human row and one agent row, even at zero width;
-- collapses embedded whitespace to one line;
-- uses Pi's `truncateToWidth()` for ANSI- and display-width-safe clipping;
+- keeps the request and intermediate activity to one row each;
+- wraps only a completed outcome, and only when it exceeds the available width;
+- indents continuation rows beneath the agent icon;
+- limits the outcome to three rows and marks omitted text with an ellipsis;
+- collapses embedded whitespace before wrapping;
+- uses Pi's ANSI- and display-width-safe wrapping and clipping utilities;
 - uses `👤` and `🤖`, or `H` and `A` in ASCII mode.
+
+The widget therefore uses two rows while Pi works and between two and four rows
+when an outcome is complete. Height changes are confined to the completed state
+instead of occurring with every intermediate status.
 
 Runtime state updates on every event. UI commits are separate: `RenderThrottle`
 commits immediately when the interval permits and retains one trailing update
@@ -298,7 +305,7 @@ The tests cover:
 - bounded context extraction and model-output normalization;
 - accepted-input timing and stale-result rejection;
 - compaction cancellation;
-- fixed-height, width-safe rendering and ASCII icons;
+- one-row intermediate rendering, capped outcome wrapping, and ASCII icons;
 - immediate plus trailing render throttling;
 - widget cleanup on shutdown.
 

@@ -1,15 +1,23 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+  type Component,
+  type TUI,
+} from "@earendil-works/pi-tui";
 
 import type { IconStyle } from "./config.js";
 import { normalizeOneLine } from "./conversation.js";
 
 export const WHERE_AM_I_WIDGET_ID = "pi-where-am-i";
 export const RENDER_INTERVAL_MS = 2_000;
+export const MAX_OUTCOME_LINES = 3;
 
 export interface WhereAmIView {
   request: string;
   activity: string;
+  wrapActivity?: boolean;
 }
 
 export interface Scheduler {
@@ -59,6 +67,41 @@ export class RenderThrottle {
   }
 }
 
+function capOutcomeLines(lines: string[], width: number): string[] {
+  if (lines.length <= MAX_OUTCOME_LINES) return lines;
+
+  const visible = lines.slice(0, MAX_OUTCOME_LINES);
+  const lastIndex = visible.length - 1;
+  const lastLine = visible[lastIndex] ?? "";
+  visible[lastIndex] = `${truncateToWidth(lastLine, Math.max(0, width - 1), "")}…`;
+  return visible;
+}
+
+function renderAgentLines(
+  activity: string,
+  width: number,
+  theme: Theme,
+  agentIcon: string,
+  wrap: boolean,
+): string[] {
+  const prefix = `${theme.fg("muted", agentIcon)} `;
+  const content = theme.fg("text", activity);
+  if (!wrap) return [truncateToWidth(`${prefix}${content}`, width, "")];
+
+  const prefixWidth = visibleWidth(prefix);
+  const contentWidth = width - prefixWidth;
+  if (contentWidth <= 0) {
+    return [truncateToWidth(`${prefix}${content}`, width, "")];
+  }
+
+  const wrapped = capOutcomeLines(
+    wrapTextWithAnsi(content, contentWidth),
+    contentWidth,
+  );
+  const indent = " ".repeat(prefixWidth);
+  return wrapped.map((line, index) => `${index === 0 ? prefix : indent}${line}`);
+}
+
 export function renderWhereAmILines(
   view: WhereAmIView,
   width: number,
@@ -71,11 +114,10 @@ export function renderWhereAmILines(
   const activity = normalizeOneLine(view.activity) || "Idle — waiting for you";
   const [humanIcon, agentIcon] = iconStyle === "ascii" ? ["H", "A"] : ["👤", "🤖"];
   const humanLine = `${theme.fg("muted", humanIcon)} ${theme.fg("text", request)}`;
-  const agentLine = `${theme.fg("muted", agentIcon)} ${theme.fg("text", activity)}`;
 
   return [
     truncateToWidth(humanLine, width, ""),
-    truncateToWidth(agentLine, width, ""),
+    ...renderAgentLines(activity, width, theme, agentIcon, view.wrapActivity === true),
   ];
 }
 

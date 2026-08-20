@@ -357,6 +357,10 @@ export function registerWhereAmIExtension(
       () => ({
         request: nextRuntime.requestLine,
         activity: describeActivity(nextRuntime.activity, nextRuntime.outcomeLine),
+        wrapActivity:
+          nextRuntime.activity.phase === "done" &&
+          nextRuntime.activity.backgroundProcesses.size === 0 &&
+          Boolean(nextRuntime.outcomeLine),
       }),
       options.scheduler,
       nextRuntime.config.icons ?? "emoji",

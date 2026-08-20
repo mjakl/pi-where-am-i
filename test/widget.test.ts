@@ -14,7 +14,11 @@ const plainTheme = {
   fg: (_color: string, text: string) => text,
 } as Theme;
 
-test("renders exactly one width-safe line per type", () => {
+const ansiTheme = {
+  fg: (_color: string, text: string) => `\u001b[31m${text}\u001b[39m`,
+} as Theme;
+
+test("keeps request and intermediate activity to one width-safe line each", () => {
   const lines = renderWhereAmILines({
     request: "Asked to explore a deliberately long\nimplementation detail",
     activity: "Exploring\r\nthe codebase",
@@ -25,6 +29,44 @@ test("renders exactly one width-safe line per type", () => {
   assert.ok(lines.every((line) => !/[\r\n]/.test(line)));
   assert.match(lines[0] ?? "", /^👤 /);
   assert.match(lines[1] ?? "", /^🤖 /);
+});
+
+test("wraps only completed outcomes and caps them at three lines", () => {
+  const lines = renderWhereAmILines({
+    request: "Add parser regression coverage",
+    activity:
+      "Done: Added parser regression coverage, documented malformed input behavior, and verified the complete test suite without failures.",
+    wrapActivity: true,
+  }, 24, plainTheme);
+
+  assert.equal(lines.length, 4);
+  assert.ok(lines.every((line) => visibleWidth(line) <= 24));
+  assert.match(lines[0] ?? "", /^👤 /);
+  assert.match(lines[1] ?? "", /^🤖 /);
+  assert.match(lines[2] ?? "", /^ {3}\S/);
+  assert.match(lines[3] ?? "", /^ {3}.*…$/);
+});
+
+test("keeps wrapped themed outcomes display-width safe", () => {
+  const lines = renderWhereAmILines({
+    request: "Review wrapping",
+    activity:
+      "Done: Wrapped the completed outcome while preserving terminal styling and display widths.",
+    wrapActivity: true,
+  }, 24, ansiTheme);
+
+  assert.ok(lines.length > 2);
+  assert.ok(lines.every((line) => visibleWidth(line) <= 24));
+});
+
+test("does not add rows when a completed outcome fits", () => {
+  const lines = renderWhereAmILines({
+    request: "Run tests",
+    activity: "Done: All tests passed",
+    wrapActivity: true,
+  }, 80, plainTheme);
+
+  assert.equal(lines.length, 2);
 });
 
 test("supports one-character ASCII icons", () => {

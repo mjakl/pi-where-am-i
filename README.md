@@ -2,7 +2,7 @@
 
 **See what you asked Pi to do, what it is doing, and how the turn ended without scrolling.**
 
-`pi-where-am-i` keeps two lines above the Pi editor:
+`pi-where-am-i` keeps a request and status above the Pi editor:
 
 ```text
 👤 Asked to add regression coverage for the parser
@@ -150,9 +150,11 @@ such as `Writing response`, `Exploring the codebase`, `Editing code`,
 `Running tests`, `Building`, and `Researching`. Parallel tools stay visible
 until their own completion events arrive.
 
-When the agent settles, the line shows `Done: <outcome>`. Without a configured
-model, the outcome is a shortened form of the final assistant response. If no
-assistant text is available, it falls back to `Done — waiting for you`.
+When the agent settles, the line shows `Done: <outcome>`. If the outcome does
+not fit, it wraps to at most three rows. Request and intermediate activity stay
+on one row. Without a configured model, the outcome is a shortened form of the
+final assistant response. If no assistant text is available, it falls back to
+`Done — waiting for you`.
 
 When [`@mjakl/pi-processes`](https://github.com/mjakl/pi-processes) starts a
 managed process, the line continues to show `Background process running: <name>`
@@ -169,8 +171,10 @@ shown by name.
 - The widget appears only in Pi's interactive TUI.
 - It describes the terminal in front of you; it is not a dashboard for all Pi
   sessions.
-- It always uses two rows. Long text and embedded newlines are collapsed and
-  clipped to the terminal width.
+- The request and intermediate activity each use one row. A completed outcome
+  can wrap to three rows, so the whole widget uses at most four.
+- Embedded newlines are collapsed. Text beyond the row limit is clipped to the
+  terminal width with an ellipsis.
 - It shows `Done` only after Pi reports that retries, compaction, and queued work
   have settled and no tracked background process remains.
 
