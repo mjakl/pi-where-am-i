@@ -1,49 +1,48 @@
 # pi-where-am-i
 
-**Always-visible context for Pi sessions: what you asked and what Pi is doing.**
+**See what you asked Pi to do and what it is doing now, without scrolling.**
 
-`pi-where-am-i` keeps two compact lines above Pi's editor:
+`pi-where-am-i` keeps two lines above the Pi editor:
 
 ```text
 👤 Confirmed exploring the tokenizer as well as the parser
 🤖 Exploring the codebase + 1 other tool
 ```
 
-It is designed for working in several terminals at once, where returning to a
-session can otherwise mean scrolling back just to remember its task and state.
+The first line describes your latest request. The second reports Pi's current
+activity.
 
-## Features
+## Why use it?
 
-- **Contextual request line** — an explicitly configured cheap model can turn a
-  short reply such as `yes` into a useful description using the immediately
-  preceding assistant text.
-- **Live activity line** — derives honest status from Pi lifecycle and tool
-  events without spending model tokens.
-- **Parallel-tool tracking** — a tool remains active until its own completion
-  event; another tool finishing cannot erase it.
-- **Correct completion state** — shows done only after `agent_settled`, not an
-  intermediate `agent_end` before retries, compaction, or queued work.
-- **Bounded updates** — internal state changes immediately while terminal
-  renders are coalesced to at most once every two seconds.
-- **Safe fallback** — without a configured/authenticated summary model, the
-  request line shows a clipped local form of the user's input. It never falls
-  back to Pi's foreground model.
+When several Pi sessions are open, it is easy to return to a terminal and lose
+your place. This extension answers two questions at a glance:
+
+- What did I ask this session to do?
+- Is Pi thinking, using tools, or waiting for me?
+
+The activity line works without a model. The request line also works without a
+model, but it then shows a shortened form of your input. You can configure a
+small text model to turn a reply such as `yes` or `do that` into a useful label
+based on the preceding exchange.
 
 ## Install
 
-From Git:
+> Pi extensions run with your user account's permissions. Review third-party
+> source code before installing it.
+
+Install from GitHub:
 
 ```bash
 pi install git:github.com/mjakl/pi-where-am-i
 ```
 
-From a local checkout:
+Or install a local checkout:
 
 ```bash
 pi install /path/to/pi-where-am-i
 ```
 
-For one temporary session:
+To try it for one session without installing it:
 
 ```bash
 pi -e /path/to/pi-where-am-i
@@ -51,17 +50,22 @@ pi -e /path/to/pi-where-am-i
 
 Restart Pi or run `/reload` after installation.
 
-## Configure the request model
+This release requires Node.js 22.19 or newer. Development checks use Pi
+0.84.2; other Pi versions are currently unverified.
 
-The activity line needs no model. Contextual request interpretation is enabled
-only when one explicit model is configured at:
+## Configure it
+
+Configuration is optional. Without it, you get emoji icons, live activity, and
+a request line based on your latest input.
+
+Create this file:
 
 ```text
 ~/.pi/agent/extensions/pi-where-am-i.json
 ```
 
-If `PI_CODING_AGENT_DIR` is set, the file is resolved below that directory
-instead.
+If you set `PI_CODING_AGENT_DIR`, place the file in that directory's
+`extensions/` subdirectory instead.
 
 ```json
 {
@@ -73,85 +77,91 @@ instead.
 }
 ```
 
-Use `pi --list-models` to find the exact provider and model ID. Choose a cheap,
-fast text model, preferably one that does not reason. The side request does not
-opt into reasoning, disables retries and prompt-cache retention, emits at most
-96 tokens, and times out after eight seconds.
+The fields are:
 
-Copy [`where-am-i.example.json`](where-am-i.example.json) as a starting point.
-Invalid configuration produces a warning and uses the local fallback.
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `model.provider` | No | Exact Pi provider ID for contextual request labels |
+| `model.id` | No | Exact Pi model ID |
+| `icons` | No | `"emoji"` (default) or `"ascii"` |
 
-Emoji icons are the default. Set `"icons": "ascii"` to use the one-character
-markers `H` and `A` when the terminal font cannot display emoji. Terminal font
-support cannot be detected reliably, so the fallback is explicit.
+The model is optional, but `model.provider` and `model.id` must be set together.
+Authenticate the provider with Pi's `/login` command or its API-key environment
+variable. Then use `pi --list-models` to find the exact provider and model IDs.
+Choose a fast, inexpensive text model. The extension does not request a
+reasoning level, but the provider or model can still apply its own defaults.
 
-## What the model sees
+If the configuration is invalid, Pi shows a warning and the extension keeps the
+local request label. An unavailable model or failed authentication also leaves
+the local label in place. The extension never falls back to Pi's foreground
+model.
 
-The request interpreter receives only three clipped text fields:
+Copy [`where-am-i.example.json`](where-am-i.example.json) if you want a starting
+point.
 
-1. the previous request label, up to 240 characters;
-2. the assistant text immediately before the new input, up to 2,000 characters;
-3. the new user input, up to 1,000 characters.
+### ASCII icons
 
-It does not deliberately receive Pi's system prompt, images, tool calls,
-tool results, or raw file payloads. Assistant prose can itself contain a code
-excerpt, so choose the configured provider accordingly.
+If your terminal font does not render the emoji, set:
 
-Idle input is sent to the interpreter only after Pi accepts it; queued input is
-sent only when Pi delivers its user message. Input handled by another extension
-or rejected during foreground validation is not sent to the configured model.
+```json
+{
+  "icons": "ascii"
+}
+```
 
-Newer user input aborts or supersedes older interpretation. Session replacement,
-tree navigation, compaction, reload, and shutdown invalidate late results.
+The widget will use `H` for the human line and `A` for the agent line.
 
-## Activity vocabulary
+## Model use and privacy
 
-The second line reports observable Pi activity:
+When you configure a request model, the extension makes a separate short model
+request for each accepted user input. It can also make one request when it
+restores or reloads a session, or when you move to another point in the session
+tree. The provider can charge for these calls, but their usage is not added to
+Pi's session totals.
 
-| Evidence | Status |
-| --- | --- |
-| Agent/model work | `Thinking / preparing next step` |
-| Assistant text stream | `Writing response` |
-| Read/find/grep/list or read-only Git inspection | `Exploring the codebase` |
-| Web search/fetch | `Researching` |
-| Edit/write | `Editing code` |
-| Recognized test command | `Running tests` |
-| Recognized build/typecheck command | `Building` |
-| Subagent call | `Delegating work` |
-| Compaction | `Compacting context` |
-| Fully settled | `Done — waiting for you` |
+The conversation data contains only these text fields:
 
-Unknown tools appear as `Running <tool name>`. Concurrent work adds a compact
-`+ N other tools` suffix. Steering and follow-up input add `message queued`.
+| Field | Maximum length |
+| --- | ---: |
+| Previous request label | 240 characters |
+| Assistant text immediately before the new input | 2,000 characters |
+| New user input | 1,000 characters |
 
-This is intentionally an observable status, not a semantic guess. Pi cannot
-keep reporting a detached process after the responsible tool stops emitting
-lifecycle events.
+The call also includes a fixed instruction that asks the model for a one-line
+orientation label. The extension does not deliberately send Pi's system prompt,
+images, tool calls, tool results, or raw file contents. Assistant text can
+contain code or other sensitive text, so choose the provider with that in mind.
 
-## Fixed-height rendering
+Each request has an eight-second timeout, no retries, a 96-token output limit,
+and asks Pi not to retain a prompt cache. This setting does not control the
+provider's logging or data-retention policy. New input cancels or supersedes an
+older request; a late result cannot replace a newer label.
 
-The widget always returns exactly two rows: one human row and one agent row.
-Embedded newlines are collapsed to spaces, and each row is truncated to the
-available display width before Pi renders it. Its height therefore cannot grow
-when a model returns a multi-line note or when the terminal narrows.
+## What the activity line means
 
-Pi places above-editor widgets in its fixed dock and adds one standard spacer
-above that container. In fullscreen mode, extra widget rows reduce the
-transcript viewport; changing widget height can therefore appear to push the
-screen. This extension keeps its own contribution fixed at two rows.
+The activity line comes from Pi's lifecycle and tool events. It reports states
+such as `Writing response`, `Exploring the codebase`, `Editing code`,
+`Running tests`, `Building`, `Researching`, and `Done — waiting for you`.
+Parallel tools stay visible until their own completion events arrive.
 
-## Scope
+This is an observable status, not a guess about Pi's intent. An unknown tool is
+shown by name. A detached process cannot remain visible after the tool that
+started it stops emitting lifecycle events.
 
-The widget is a TUI feature. Print and JSON modes have no persistent terminal
-surface, and Pi's RPC mode ignores component widget factories.
+## Limits
 
-The extension explains the terminal currently in view. It does not provide a
-cross-terminal dashboard. Terminal-title or tmux integration can be added
-separately if locating the right pane remains the main problem.
+- The widget appears only in Pi's interactive TUI.
+- It describes the terminal in front of you; it is not a dashboard for all Pi
+  sessions.
+- It always uses two rows. Long text and embedded newlines are collapsed and
+  clipped to the terminal width.
+- It shows `Done` only after Pi reports that retries, compaction, and queued work
+  have settled.
+
+For the event flow, activity classification, safety rules, and source map, see
+[`HOW_IT_WORKS.md`](HOW_IT_WORKS.md).
 
 ## Development
-
-Pi loads the TypeScript source directly from the package manifest.
 
 ```bash
 npm install
@@ -159,11 +169,7 @@ npm run check
 pi -e .
 ```
 
-`npm run check` runs the strict TypeScript check, Node test suite, and package
-dry run.
-
-The research, trade-offs, panel critique, and implementation acceptance criteria
-are documented in [`PLAN.md`](PLAN.md).
+`npm run check` runs the TypeScript check, test suite, and package dry run.
 
 ## License
 

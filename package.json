@@ -7,7 +7,7 @@
   "files": [
     "src",
     "README.md",
-    "PLAN.md",
+    "HOW_IT_WORKS.md",
     "LICENSE",
     "where-am-i.example.json"
   ],
