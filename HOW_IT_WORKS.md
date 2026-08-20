@@ -5,18 +5,21 @@ contains the user-facing explanation, installation steps, and configuration.
 
 ## Design
 
-The extension uses two independent sources of information:
+The extension combines conversation text with observed lifecycle events:
 
 ```text
 accepted user input ──► optional text model ──► request line
-Pi lifecycle events  ──► activity reducer    ──► activity line
-                                      │
-                                      └──► throttled two-row widget
+final assistant text ─► optional text model ──► completed outcome
+Pi and tool events ───► activity reducer ─────► live activity
+process lifecycle ────► tracked process map ─► background status
+                                                   │
+                                                   └──► throttled two-row widget
 ```
 
-A model is useful for resolving conversational shorthand. Pi's own events are a
-better source for current activity because they are cheaper and more precise.
-The extension does not ask a model to infer whether a tool is running.
+A model is useful for resolving conversational shorthand and tightening a final
+outcome. Pi's events are a better source for current activity because they are
+cheaper and more precise. The extension does not ask a model to infer whether a
+tool or process is running.
 
 The implementation follows these rules:
 
@@ -27,9 +30,12 @@ The implementation follows these rules:
 4. Let only the latest accepted input update the request line.
 5. Track each active tool by `toolCallId` so parallel calls cannot erase one
    another.
-6. Report completion only after `agent_settled` and `ctx.isIdle()`.
-7. Render exactly two width-safe rows.
-8. Clear timers, pending requests, and the widget when the session runtime ends.
+6. Keep managed processes visible after their `process start` tool call ends.
+7. Report completion only after `agent_settled`, `ctx.isIdle()`, and no tracked
+   process remains.
+8. Summarize a completed turn from bounded assistant text, never tool results.
+9. Render exactly two width-safe rows.
+10. Clear timers, pending requests, and the widget when the session runtime ends.
 
 ## Source map
 
@@ -38,8 +44,8 @@ The implementation follows these rules:
 | `src/index.ts` | Extension registration, lifecycle wiring, input queues, cancellation, and session cleanup |
 | `src/config.ts` | Configuration path, parsing, and validation |
 | `src/conversation.ts` | Transcript text extraction, one-line normalization, clipping, and local fallback |
-| `src/request-interpreter.ts` | Model lookup, authentication, bounded prompt, and nested completion |
-| `src/activity.ts` | Pure activity reducer, tool classification, and display text |
+| `src/request-interpreter.ts` | Model lookup, authentication, bounded request and outcome prompts, and nested completion |
+| `src/activity.ts` | Pure activity reducer, tool and managed-process tracking, and display text |
 | `src/widget.ts` | Two-row renderer and trailing render throttle |
 | `test/*.test.ts` | Unit and mocked lifecycle coverage |
 
@@ -135,6 +141,27 @@ response. Before applying a result, the runtime also checks the abort signal,
 epoch, and generation. A provider that ignores cancellation can therefore
 finish late, but its result cannot replace current state.
 
+## Completed outcome
+
+`message_end` retains the latest assistant text from the current agent run.
+Once `agent_settled` reports an idle agent and no managed process remains, that
+text becomes the local outcome fallback. It is collapsed and clipped to 240
+characters, then shown as
+`Done: <outcome>`. If there is no assistant text, the line stays
+`Done — waiting for you`.
+
+When a model is configured, the extension sends one more bounded request with:
+
+| Field | Limit |
+| --- | ---: |
+| Current request label | 240 characters |
+| Final assistant text | 2,000 characters |
+
+The outcome prompt asks for the main result, decision, blocker, or next step in
+one line. It does not include tool arguments, tool results, process commands, or
+raw files. New input or a new agent run cancels an older outcome request, and a
+late result cannot overwrite current activity.
+
 ## Activity line
 
 `activity.ts` is a pure reducer. `src/index.ts` translates Pi events into reducer
@@ -150,11 +177,13 @@ events and asks the widget to render the resulting description.
 | Last tool ends or `agent_end` | `Reviewing results` |
 | `session_before_compact` | `Compacting context` |
 | New session with no work | `Idle — waiting for you` |
-| `agent_settled` while idle | `Done — waiting for you` |
+| `agent_settled` while idle, with final assistant text | `Done: <outcome>` |
+| `agent_settled` while idle, without final assistant text | `Done — waiting for you` |
+| Settled or idle with a tracked managed process | `Background process running: <name>` |
 
 `agent_end` is not a completion signal. Pi can still retry, compact and retry,
 or process queued input. `agent_settled` becomes `Done` only when `ctx.isIdle()`
-is also true.
+is true and the tracked managed-process map is empty.
 
 ### Tool classification
 
@@ -188,22 +217,48 @@ emits its matching `tool_execution_end`.
 If Pi has queued input, `; message queued` is appended to the current activity.
 Pi exposes whether pending messages exist, not a reliable public count.
 
+### Managed background processes
+
+A `process` tool call finishes as soon as `start` returns, even though the
+managed command keeps running. The extension therefore treats the successful
+tool result as a second lifecycle:
+
+1. A successful `start` result with a live status adds its process ID and name.
+2. A complete successful `list` result refreshes the live set. A truncated list
+   cannot remove processes that it omitted.
+3. A successful `kill`, or an `output` result with a finished status, removes
+   the target.
+4. A `pi-processes:update` custom message removes the process named by its ID.
+
+The custom message is the automatic end notification from `pi-processes`.
+Readiness messages do not remove a process because a ready server or watcher is
+still running. While the agent is settled, the process line takes precedence
+over `Done`. Multiple processes appear as the first name plus an additional
+count.
+
+This integration observes the public tool result and custom-message shapes from
+`@mjakl/pi-processes`. It does not poll, invoke another extension's tool, or
+send process data to the summary model. Other process tools remain visible only
+for the duration of their own Pi tool event.
+
 ## Compaction, tree changes, and shutdown
 
-`session_before_compact` invalidates request interpretation, saves the previous
-activity, and switches to `Compacting context`. If compaction aborts, or no
-`session_compact` arrives within 15 seconds, the previous activity is restored.
+`session_before_compact` invalidates request and outcome interpretation, saves
+the previous activity, and switches to `Compacting context`. If compaction
+aborts, or no `session_compact` arrives within 15 seconds, the previous activity
+is restored.
 A completed compaction refreshes the latest assistant text and reports either
 `Starting` for continuing work or `Done` for an idle session.
 
-`session_tree` clears queued input, invalidates pending interpretation, resets
-activity, and tries to reconstruct the request from the new active branch. If
-the branch has no text-bearing user message, the current request line remains
-unchanged.
+`session_tree` clears queued input, invalidates pending request and outcome
+interpretation, resets activity, and tries to reconstruct the request from the
+new active branch. If the branch has no text-bearing user message, the current
+request line remains unchanged.
 
-`session_shutdown` aborts interpretation, clears the compaction timer and input
-queues, disposes the render throttle, and removes the widget. Pi's replacement
-and reload flows then create a fresh runtime on the next `session_start`.
+`session_shutdown` aborts request and outcome interpretation, clears the
+compaction timer, input queues, and pending process tool calls, disposes the
+render throttle, and removes the widget. Pi's replacement and reload flows then
+create a fresh runtime on the next `session_start`.
 
 ## Rendering
 
@@ -236,6 +291,8 @@ The tests cover:
 
 - tool classification and parallel-tool ordering;
 - the distinction between `agent_end` and settled completion;
+- completed-outcome fallback and model refinement;
+- managed-process start, settlement, and automatic end notification;
 - queued follow-up delivery;
 - configuration parsing and agent-directory resolution;
 - bounded context extraction and model-output normalization;

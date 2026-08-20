@@ -4,6 +4,11 @@ export interface RequestSnapshot {
   userInput: string;
 }
 
+export interface OutcomeSnapshot {
+  request: string;
+  assistant: string;
+}
+
 interface MessageEntry {
   type: "message";
   message: {
@@ -100,6 +105,17 @@ export function boundedRequestSnapshot(snapshot: RequestSnapshot): RequestSnapsh
   };
 }
 
+export function boundedOutcomeSnapshot(snapshot: OutcomeSnapshot): OutcomeSnapshot {
+  return {
+    request: clipText(snapshot.request, 240),
+    assistant: clipText(snapshot.assistant, 2_000),
+  };
+}
+
 export function fallbackRequestLine(userInput: string): string {
   return clipText(userInput, 240) || "Sent a request";
+}
+
+export function fallbackOutcomeLine(assistantText: string): string {
+  return clipText(assistantText, 240);
 }

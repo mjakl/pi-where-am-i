@@ -24,7 +24,11 @@ after(() => {
   rmSync(agentDir, { recursive: true, force: true });
 });
 
-function createHarness(options: { config?: any; interpreter?: any } = {}) {
+function createHarness(options: {
+  config?: any;
+  interpreter?: any;
+  outcomeInterpreter?: any;
+} = {}) {
   const handlers = new Map<string, Handler>();
   let widgetFactory: WidgetFactory | undefined;
   let widgetCleared = false;
@@ -65,6 +69,7 @@ function createHarness(options: { config?: any; interpreter?: any } = {}) {
   registerWhereAmIExtension(pi as any, {
     config: options.config,
     interpreter: options.interpreter,
+    outcomeInterpreter: options.outcomeInterpreter,
     scheduler: {
       now: () => now += 2_001,
       setTimeout: () => {
@@ -140,6 +145,196 @@ test("tracks request, parallel tools, settlement, and shutdown", async () => {
 
   await harness.run("session_shutdown");
   assert.equal(harness.widgetCleared, true);
+});
+
+test("shows the final assistant outcome after settlement", async () => {
+  const harness = createHarness();
+  await harness.run("session_start");
+  await harness.run("input", {
+    text: "add regression coverage",
+    source: "interactive",
+  });
+  await harness.run("before_agent_start");
+  await harness.run("agent_start");
+  await harness.run("message_end", {
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "Added regression coverage. All tests pass." }],
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+
+  assert.equal(
+    harness.lines()[1],
+    "🤖 Done: Added regression coverage. All tests pass.",
+  );
+});
+
+test("uses the configured model to refine the outcome", async () => {
+  const calls: any[] = [];
+  const harness = createHarness({
+    config: { model: { provider: "test", id: "cheap" } },
+    outcomeInterpreter: async (_context: any, _model: any, snapshot: any) => {
+      calls.push(snapshot);
+      return "Added coverage and verified the full suite";
+    },
+  });
+  await harness.run("session_start");
+  await harness.run("input", { text: "add coverage", source: "interactive" });
+  await harness.run("before_agent_start");
+  await harness.run("agent_start");
+  await harness.run("message_end", {
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "Implemented it. The suite passes." }],
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [{
+    request: "add coverage",
+    assistant: "Implemented it. The suite passes.",
+  }]);
+  assert.equal(
+    harness.lines()[1],
+    "🤖 Done: Added coverage and verified the full suite",
+  );
+});
+
+test("keeps managed processes visible until their end notification", async () => {
+  const harness = createHarness();
+  await harness.run("session_start");
+  await harness.run("agent_start");
+  await harness.run("tool_execution_start", {
+    toolCallId: "process-1",
+    toolName: "process",
+    args: { action: "start", name: "test-runner", command: "npm test" },
+  });
+  await harness.run("tool_execution_end", {
+    toolCallId: "process-1",
+    toolName: "process",
+    result: {
+      details: {
+        action: "start",
+        success: true,
+        process: {
+          id: "proc_1",
+          name: "\u001b[31mtest-runner\u001b[0m\n",
+          status: "running",
+        },
+      },
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+
+  assert.equal(
+    harness.lines()[1],
+    "🤖 Background process running: test-runner",
+  );
+
+  await harness.run("message_start", {
+    message: {
+      role: "custom",
+      customType: "pi-processes:update",
+      details: { processId: "proc_1", status: "exited" },
+      content: "Process completed successfully.",
+    },
+  });
+  await harness.run("agent_start");
+  await harness.run("message_end", {
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "The background test run passed." }],
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+
+  assert.equal(
+    harness.lines()[1],
+    "🤖 Done: The background test run passed.",
+  );
+});
+
+test("does not reuse a previous outcome for a textless turn", async () => {
+  const harness = createHarness();
+  await harness.run("session_start");
+  await harness.run("agent_start");
+  await harness.run("message_end", {
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "The first turn passed." }],
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+  assert.equal(harness.lines()[1], "🤖 Done: The first turn passed.");
+
+  await harness.run("input", { text: "try another check", source: "interactive" });
+  await harness.run("before_agent_start");
+  await harness.run("agent_start");
+  await harness.run("message_end", {
+    message: { role: "assistant", content: [{ type: "thinking", thinking: "failed" }] },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+
+  assert.equal(harness.lines()[1], "🤖 Done — waiting for you");
+});
+
+test("does not discard tracked processes from a truncated process list", async () => {
+  const harness = createHarness();
+  await harness.run("session_start");
+  await harness.run("agent_start");
+  await harness.run("tool_execution_start", {
+    toolCallId: "start-1",
+    toolName: "process",
+    args: { action: "start", name: "older-runner", command: "npm test" },
+  });
+  await harness.run("tool_execution_end", {
+    toolCallId: "start-1",
+    toolName: "process",
+    result: {
+      details: {
+        action: "start",
+        success: true,
+        process: { id: "proc_old", name: "older-runner", status: "running" },
+      },
+    },
+  });
+
+  await harness.run("tool_execution_start", {
+    toolCallId: "list-1",
+    toolName: "process",
+    args: { action: "list" },
+  });
+  await harness.run("tool_execution_end", {
+    toolCallId: "list-1",
+    toolName: "process",
+    result: {
+      details: {
+        action: "list",
+        success: true,
+        totalProcesses: 31,
+        processes: Array.from({ length: 30 }, (_, index) => ({
+          id: `finished_${index}`,
+          name: `finished-${index}`,
+          status: "exited",
+        })),
+      },
+    },
+  });
+  await harness.run("agent_end");
+  await harness.run("agent_settled");
+
+  assert.equal(
+    harness.lines()[1],
+    "🤖 Background process running: older-runner",
+  );
 });
 
 test("shows a queued follow-up without replacing current work", async () => {

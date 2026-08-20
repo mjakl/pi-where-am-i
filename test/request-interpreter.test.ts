@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   buildInterpreterPrompt,
+  buildOutcomePrompt,
+  interpretOutcome,
   interpretRequest,
   normalizeInterpreterOutput,
 } from "../src/request-interpreter.js";
@@ -19,6 +21,18 @@ test("builds a bounded data-only interpreter prompt", () => {
     previousRequest: "Explore the parser",
     priorAssistant: "Should I inspect the tokenizer too?",
     userInput: "yes",
+  });
+});
+
+test("builds a bounded outcome prompt", () => {
+  const prompt = buildOutcomePrompt({
+    request: "Run the tests",
+    assistant: "The tests passed.",
+  });
+
+  assert.deepEqual(JSON.parse(prompt), {
+    request: "Run the tests",
+    assistant: "The tests passed.",
   });
 });
 
@@ -70,7 +84,16 @@ test("dispatches through Pi's registered provider", async () => {
     new AbortController().signal,
   );
 
+  const outcome = await interpretOutcome(
+    context as any,
+    { provider: "native-test", id: "cheap" },
+    { request: "Use the native provider", assistant: "It worked." },
+    new AbortController().signal,
+  );
+
   assert.equal(result, "Confirmed using the native provider");
-  assert.equal(calls.length, 1);
+  assert.equal(outcome, "Confirmed using the native provider");
+  assert.equal(calls.length, 2);
   assert.equal(calls[0]?.[0], model);
+  assert.match(calls[1]?.[1].systemPrompt ?? "", /outcome summary/);
 });

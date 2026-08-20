@@ -45,6 +45,10 @@ test("does not report done at agent_end", () => {
 
   state = reduceActivity(state, { type: "agent_settled" });
   assert.equal(describeActivity(state), "Done — waiting for you");
+  assert.equal(
+    describeActivity(state, "Added coverage and all tests passed"),
+    "Done: Added coverage and all tests passed",
+  );
 });
 
 test("keeps queued follow-up visible while current work continues", () => {
@@ -53,6 +57,31 @@ test("keeps queued follow-up visible while current work continues", () => {
   assert.equal(describeActivity(state), "Thinking / preparing next step; message queued");
 
   state = reduceActivity(state, { type: "agent_settled" });
+  assert.equal(describeActivity(state), "Done — waiting for you");
+});
+
+test("keeps managed background processes visible after the agent settles", () => {
+  let state = reduceActivity(createActivityState(), {
+    type: "background_process_start",
+    id: "proc_1",
+    name: "test-runner",
+  });
+  state = reduceActivity(state, {
+    type: "background_process_start",
+    id: "proc_2",
+    name: "dev-server",
+  });
+  state = reduceActivity(state, { type: "agent_settled" });
+
+  assert.equal(
+    describeActivity(state, "Started the requested work"),
+    "Background processes running: test-runner + 1 other",
+  );
+
+  state = reduceActivity(state, { type: "background_process_end", id: "proc_1" });
+  assert.equal(describeActivity(state), "Background process running: dev-server");
+
+  state = reduceActivity(state, { type: "background_process_end", id: "DEV-SERVER" });
   assert.equal(describeActivity(state), "Done — waiting for you");
 });
 

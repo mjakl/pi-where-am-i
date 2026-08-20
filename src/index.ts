@@ -9,13 +9,15 @@ import {
 } from "./activity.js";
 import { loadWhereAmIConfig, type WhereAmIConfig } from "./config.js";
 import {
+  fallbackOutcomeLine,
   fallbackRequestLine,
   latestAssistantText,
   latestRequestSnapshot,
   textContent,
+  type OutcomeSnapshot,
   type RequestSnapshot,
 } from "./conversation.js";
-import { interpretRequest } from "./request-interpreter.js";
+import { interpretOutcome, interpretRequest } from "./request-interpreter.js";
 import {
   setupWhereAmIWidget,
   type Scheduler,
@@ -27,27 +29,143 @@ interface PendingInput {
   behavior: "idle" | "steer" | "followUp";
 }
 
+interface PendingProcessCall {
+  name: string;
+  args: unknown;
+}
+
 interface Runtime {
   context: ExtensionContext;
   config: WhereAmIConfig;
   interpreter: typeof interpretRequest;
+  outcomeInterpreter: typeof interpretOutcome;
   epoch: number;
   requestGeneration: number;
   requestAbort: AbortController | null;
+  outcomeGeneration: number;
+  outcomeAbort: AbortController | null;
   requestLine: string;
+  outcomeLine: string;
   activity: ActivityState;
   lastAssistantText: string;
+  turnAssistantText: string;
   streamingAssistantText: string;
   pendingIdleInput: PendingInput | null;
   steeringInputs: PendingInput[];
   followUpInputs: PendingInput[];
+  pendingProcessCalls: Map<string, PendingProcessCall>;
   compactionTimer: ReturnType<typeof setTimeout> | null;
   compactionPreviousActivity: ActivityState | null;
   widget: WidgetController;
 }
 
+const LIVE_PROCESS_STATUSES = new Set([
+  "running",
+  "terminating",
+  "terminate_timeout",
+]);
+const PROCESS_UPDATE_MESSAGE = "pi-processes:update";
+const TERMINAL_ESCAPE_PATTERN = new RegExp(
+  [
+    "\\x1B\\[[0-?]*[ -/]*[@-~]",
+    "\\x1B\\][^\\x07\\x1B]*(?:\\x07|\\x1B\\\\)",
+    "\\x1B[PX^_][^\\x07\\x1B]*(?:\\x07|\\x1B\\\\)",
+    "\\x1B[@-_]",
+  ].join("|"),
+  "gu",
+);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cleanProcessName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const safe = value
+    .replace(TERMINAL_ESCAPE_PATTERN, "")
+    .replace(/[\p{Cc}]/gu, " ");
+  return safe.replace(/\s+/g, " ").trim() || fallback;
+}
+
 function sessionEntries(context: ExtensionContext): readonly unknown[] {
   return context.sessionManager.buildContextEntries();
+}
+
+function processActivityEvent(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+): ActivityEvent | undefined {
+  if (toolName.toLowerCase() !== "process" || !isRecord(result)) return undefined;
+  const details = result.details;
+  if (!isRecord(details) || details.success !== true || typeof details.action !== "string") {
+    return undefined;
+  }
+
+  if (details.action === "start" && isRecord(details.process)) {
+    const id = details.process.id;
+    if (
+      typeof id !== "string" ||
+      typeof details.process.status !== "string" ||
+      !LIVE_PROCESS_STATUSES.has(details.process.status)
+    ) {
+      return undefined;
+    }
+    return {
+      type: "background_process_start",
+      id,
+      name: cleanProcessName(details.process.name, id),
+    };
+  }
+
+  if (details.action === "list" && Array.isArray(details.processes)) {
+    if (
+      typeof details.totalProcesses === "number" &&
+      details.totalProcesses > details.processes.length
+    ) {
+      return undefined;
+    }
+    const processes = details.processes.flatMap((process) => {
+      if (
+        !isRecord(process) ||
+        typeof process.id !== "string" ||
+        typeof process.status !== "string"
+      ) {
+        return [];
+      }
+      if (!LIVE_PROCESS_STATUSES.has(process.status)) return [];
+      return [{
+        id: process.id,
+        name: cleanProcessName(process.name, process.id),
+      }];
+    });
+    return { type: "background_process_sync", processes };
+  }
+
+  if (!isRecord(args) || typeof args.id !== "string") return undefined;
+  if (details.action === "kill") {
+    return { type: "background_process_end", id: args.id };
+  }
+  if (
+    details.action === "output" &&
+    isRecord(details.output) &&
+    typeof details.output.status === "string" &&
+    !LIVE_PROCESS_STATUSES.has(details.output.status)
+  ) {
+    return { type: "background_process_end", id: args.id };
+  }
+
+  return undefined;
+}
+
+function processEndMessageEvent(message: unknown): ActivityEvent | undefined {
+  if (!isRecord(message) || message.role !== "custom") return undefined;
+  if (message.customType !== PROCESS_UPDATE_MESSAGE || !isRecord(message.details)) {
+    return undefined;
+  }
+  const id = message.details.processId;
+  if (typeof id !== "string") return undefined;
+  return { type: "background_process_end", id };
 }
 
 function updateActivity(
@@ -69,6 +187,12 @@ function invalidateInterpretation(runtime: Runtime): void {
   runtime.requestGeneration += 1;
   runtime.requestAbort?.abort();
   runtime.requestAbort = null;
+}
+
+function invalidateOutcomeInterpretation(runtime: Runtime): void {
+  runtime.outcomeGeneration += 1;
+  runtime.outcomeAbort?.abort();
+  runtime.outcomeAbort = null;
 }
 
 function startInterpretation(
@@ -113,10 +237,55 @@ function startInterpretation(
     });
 }
 
+function startOutcomeInterpretation(
+  runtime: Runtime,
+  snapshot: OutcomeSnapshot,
+): void {
+  runtime.outcomeLine = fallbackOutcomeLine(snapshot.assistant);
+  invalidateOutcomeInterpretation(runtime);
+  runtime.widget.requestRender();
+
+  const modelConfig = runtime.config.model;
+  if (!runtime.outcomeLine || !modelConfig || runtime.context.mode !== "tui") return;
+
+  const controller = new AbortController();
+  const generationAtStart = runtime.outcomeGeneration;
+  const epochAtStart = runtime.epoch;
+  runtime.outcomeAbort = controller;
+
+  void runtime.outcomeInterpreter(
+    runtime.context,
+    modelConfig,
+    snapshot,
+    controller.signal,
+  )
+    .then((interpretation) => {
+      if (
+        !interpretation ||
+        controller.signal.aborted ||
+        runtime.epoch !== epochAtStart ||
+        runtime.outcomeGeneration !== generationAtStart
+      ) {
+        return;
+      }
+
+      runtime.outcomeLine = interpretation;
+      runtime.widget.requestRender();
+    })
+    .catch(() => {
+      // The final assistant text is already visible as the local fallback.
+    })
+    .finally(() => {
+      if (runtime.outcomeAbort === controller) runtime.outcomeAbort = null;
+    });
+}
+
 function reconstructRequest(runtime: Runtime): void {
   const entries = sessionEntries(runtime.context);
   runtime.lastAssistantText = latestAssistantText(entries);
+  runtime.turnAssistantText = "";
   runtime.streamingAssistantText = "";
+  runtime.outcomeLine = fallbackOutcomeLine(runtime.lastAssistantText);
 
   const snapshot = latestRequestSnapshot(entries, runtime.requestLine);
   if (snapshot) startInterpretation(runtime, snapshot);
@@ -130,16 +299,19 @@ function clearCompactionTimer(runtime: Runtime): void {
 
 function disposeRuntime(runtime: Runtime): void {
   invalidateInterpretation(runtime);
+  invalidateOutcomeInterpretation(runtime);
   clearCompactionTimer(runtime);
   runtime.pendingIdleInput = null;
   runtime.steeringInputs = [];
   runtime.followUpInputs = [];
+  runtime.pendingProcessCalls.clear();
   runtime.widget.dispose();
 }
 
 export interface WhereAmIExtensionOptions {
   scheduler?: Scheduler;
   interpreter?: typeof interpretRequest;
+  outcomeInterpreter?: typeof interpretOutcome;
   config?: WhereAmIConfig;
 }
 
@@ -159,16 +331,22 @@ export function registerWhereAmIExtension(
       context,
       config: loaded.config,
       interpreter: options.interpreter ?? interpretRequest,
+      outcomeInterpreter: options.outcomeInterpreter ?? interpretOutcome,
       epoch: 0,
       requestGeneration: 0,
       requestAbort: null,
+      outcomeGeneration: 0,
+      outcomeAbort: null,
       requestLine: "No request yet",
+      outcomeLine: "",
       activity: createActivityState(),
       lastAssistantText: "",
+      turnAssistantText: "",
       streamingAssistantText: "",
       pendingIdleInput: null,
       steeringInputs: [],
       followUpInputs: [],
+      pendingProcessCalls: new Map(),
       compactionTimer: null,
       compactionPreviousActivity: null,
       widget: { requestRender() {}, dispose() {} },
@@ -178,7 +356,7 @@ export function registerWhereAmIExtension(
       context,
       () => ({
         request: nextRuntime.requestLine,
-        activity: describeActivity(nextRuntime.activity),
+        activity: describeActivity(nextRuntime.activity, nextRuntime.outcomeLine),
       }),
       options.scheduler,
       nextRuntime.config.icons ?? "emoji",
@@ -206,6 +384,8 @@ export function registerWhereAmIExtension(
     current.requestGeneration += 1;
     current.requestAbort?.abort();
     current.requestAbort = null;
+    invalidateOutcomeInterpretation(current);
+    current.outcomeLine = "";
 
     const rawInput = event.text.trim() || (event.images?.length ? "Shared an image" : "Sent a request");
     const priorAssistant = current.streamingAssistantText || current.lastAssistantText || latestAssistantText(sessionEntries(context));
@@ -245,6 +425,9 @@ export function registerWhereAmIExtension(
   pi.on("agent_start", (_event, context) => {
     const current = runtime;
     if (!current) return;
+    invalidateOutcomeInterpretation(current);
+    current.outcomeLine = "";
+    current.turnAssistantText = "";
     current.streamingAssistantText = "";
     updateActivity(current, { type: "agent_start" }, context);
   });
@@ -258,7 +441,16 @@ export function registerWhereAmIExtension(
 
   pi.on("message_start", (event, context) => {
     const current = runtime;
-    if (!current || event.message.role !== "user") return;
+    if (!current) return;
+
+    const processEnd = processEndMessageEvent(event.message);
+    if (processEnd) {
+      invalidateOutcomeInterpretation(current);
+      current.outcomeLine = "";
+      updateActivity(current, processEnd, context);
+      return;
+    }
+    if (event.message.role !== "user") return;
 
     const pending = current.steeringInputs.shift() ?? current.followUpInputs.shift();
     updateActivity(
@@ -293,13 +485,20 @@ export function registerWhereAmIExtension(
     if (!current || event.message.role !== "assistant") return;
 
     const assistantText = textContent(event.message.content);
-    if (assistantText.trim()) current.lastAssistantText = assistantText;
+    current.turnAssistantText = assistantText.trim() ? assistantText : "";
+    if (current.turnAssistantText) current.lastAssistantText = current.turnAssistantText;
     current.streamingAssistantText = "";
   });
 
   pi.on("tool_execution_start", (event, context) => {
     const current = runtime;
     if (!current) return;
+    if (event.toolName.toLowerCase() === "process") {
+      current.pendingProcessCalls.set(event.toolCallId, {
+        name: event.toolName,
+        args: event.args,
+      });
+    }
     updateActivity(current, {
       type: "tool_start",
       id: event.toolCallId,
@@ -311,6 +510,18 @@ export function registerWhereAmIExtension(
   pi.on("tool_execution_end", (event, context) => {
     const current = runtime;
     if (!current) return;
+
+    const pendingProcessCall = current.pendingProcessCalls.get(event.toolCallId);
+    current.pendingProcessCalls.delete(event.toolCallId);
+    if (pendingProcessCall) {
+      const processEvent = processActivityEvent(
+        pendingProcessCall.name,
+        pendingProcessCall.args,
+        event.result,
+      );
+      if (processEvent) updateActivity(current, processEvent, undefined, false);
+    }
+
     updateActivity(current, { type: "tool_end", id: event.toolCallId }, context);
   });
 
@@ -326,9 +537,21 @@ export function registerWhereAmIExtension(
     current.pendingIdleInput = null;
     current.steeringInputs = [];
     current.followUpInputs = [];
+    current.pendingProcessCalls.clear();
+
+    const settled = context.isIdle();
+    if (settled && current.activity.backgroundProcesses.size === 0) {
+      startOutcomeInterpretation(current, {
+        request: current.requestLine,
+        assistant: current.turnAssistantText,
+      });
+    } else {
+      invalidateOutcomeInterpretation(current);
+      current.outcomeLine = "";
+    }
     updateActivity(
       current,
-      context.isIdle() ? { type: "agent_settled" } : { type: "agent_end" },
+      settled ? { type: "agent_settled" } : { type: "agent_end" },
       context,
     );
   });
@@ -338,6 +561,7 @@ export function registerWhereAmIExtension(
     if (!current) return;
 
     invalidateInterpretation(current);
+    invalidateOutcomeInterpretation(current);
     clearCompactionTimer(current);
     current.compactionPreviousActivity = current.activity;
     updateActivity(current, { type: "compaction_start" }, context);
@@ -366,10 +590,12 @@ export function registerWhereAmIExtension(
     const current = runtime;
     if (!current) return;
     invalidateInterpretation(current);
+    invalidateOutcomeInterpretation(current);
     clearCompactionTimer(current);
     current.pendingIdleInput = null;
     current.steeringInputs = [];
     current.followUpInputs = [];
+    current.pendingProcessCalls.clear();
     current.activity = reduceActivity(current.activity, { type: "reset", done: context.isIdle() });
     reconstructRequest(current);
     current.widget.requestRender();

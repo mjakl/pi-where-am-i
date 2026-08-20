@@ -25,9 +25,15 @@ export interface ActiveTool {
   category: ToolCategory;
 }
 
+export interface BackgroundProcess {
+  id: string;
+  name: string;
+}
+
 export interface ActivityState {
   phase: ActivityPhase;
   activeTools: ReadonlyMap<string, ActiveTool>;
+  backgroundProcesses: ReadonlyMap<string, BackgroundProcess>;
   pendingMessage: boolean;
 }
 
@@ -43,6 +49,9 @@ export type ActivityEvent =
   | { type: "queue_sync"; pending: boolean }
   | { type: "compaction_start" }
   | { type: "compaction_end"; running: boolean }
+  | { type: "background_process_start"; id: string; name: string }
+  | { type: "background_process_end"; id: string }
+  | { type: "background_process_sync"; processes: readonly BackgroundProcess[] }
   | { type: "reset"; done?: boolean };
 
 const CATEGORY_PRIORITY: readonly ToolCategory[] = [
@@ -124,6 +133,7 @@ export function createActivityState(): ActivityState {
   return {
     phase: "idle",
     activeTools: new Map(),
+    backgroundProcesses: new Map(),
     pendingMessage: false,
   };
 }
@@ -133,7 +143,12 @@ export function reduceActivity(state: ActivityState, event: ActivityEvent): Acti
     case "input":
       return event.queued
         ? { ...state, pendingMessage: true }
-        : { phase: "starting", activeTools: new Map(), pendingMessage: false };
+        : {
+            ...state,
+            phase: "starting",
+            activeTools: new Map(),
+            pendingMessage: false,
+          };
     case "agent_start":
       return { ...state, phase: "thinking", activeTools: new Map() };
     case "thinking":
@@ -161,7 +176,12 @@ export function reduceActivity(state: ActivityState, event: ActivityEvent): Acti
     case "agent_end":
       return { ...state, phase: "reviewing", activeTools: new Map() };
     case "agent_settled":
-      return { phase: "done", activeTools: new Map(), pendingMessage: false };
+      return {
+        ...state,
+        phase: "done",
+        activeTools: new Map(),
+        pendingMessage: false,
+      };
     case "queue_sync":
       return { ...state, pendingMessage: event.pending };
     case "compaction_start":
@@ -173,8 +193,33 @@ export function reduceActivity(state: ActivityState, event: ActivityEvent): Acti
         activeTools: new Map(),
         pendingMessage: event.running ? state.pendingMessage : false,
       };
+    case "background_process_start": {
+      const backgroundProcesses = new Map(state.backgroundProcesses);
+      backgroundProcesses.set(event.id, { id: event.id, name: event.name });
+      return { ...state, backgroundProcesses };
+    }
+    case "background_process_end": {
+      const backgroundProcesses = new Map(state.backgroundProcesses);
+      if (!backgroundProcesses.delete(event.id)) {
+        const targetName = event.id.toLowerCase();
+        for (const [id, process] of backgroundProcesses) {
+          if (process.name.toLowerCase() === targetName) {
+            backgroundProcesses.delete(id);
+          }
+        }
+      }
+      return { ...state, backgroundProcesses };
+    }
+    case "background_process_sync":
+      return {
+        ...state,
+        backgroundProcesses: new Map(
+          event.processes.map((process) => [process.id, process]),
+        ),
+      };
     case "reset":
       return {
+        ...state,
         phase: event.done ? "done" : "idle",
         activeTools: new Map(),
         pendingMessage: false,
@@ -194,7 +239,20 @@ function humanizeToolName(name: string): string {
   return name.replace(/[_-]+/g, " ").trim() || "tool";
 }
 
-export function describeActivity(state: ActivityState): string {
+function describeBackgroundProcesses(
+  processes: ReadonlyMap<string, BackgroundProcess>,
+): string {
+  const first = processes.values().next().value as BackgroundProcess | undefined;
+  if (!first) return "";
+  if (processes.size === 1) return `Background process running: ${first.name}`;
+  const others = `${processes.size - 1} other${processes.size === 2 ? "" : "s"}`;
+  return `Background processes running: ${first.name} + ${others}`;
+}
+
+export function describeActivity(
+  state: ActivityState,
+  outcome = "",
+): string {
   const tools = [...state.activeTools.values()];
   let description: string;
 
@@ -204,6 +262,11 @@ export function describeActivity(state: ActivityState): string {
       ? `Running ${humanizeToolName(primary.name)}`
       : CATEGORY_LABELS[primary?.category ?? "unknown"];
     if (tools.length > 1) description += ` + ${tools.length - 1} other tool${tools.length === 2 ? "" : "s"}`;
+  } else if (
+    state.backgroundProcesses.size > 0 &&
+    (state.phase === "idle" || state.phase === "done")
+  ) {
+    description = describeBackgroundProcesses(state.backgroundProcesses);
   } else {
     switch (state.phase) {
       case "idle":
@@ -225,7 +288,7 @@ export function describeActivity(state: ActivityState): string {
         description = "Compacting context";
         break;
       case "done":
-        description = "Done — waiting for you";
+        description = outcome ? `Done: ${outcome}` : "Done — waiting for you";
         break;
     }
   }

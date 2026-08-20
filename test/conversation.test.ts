@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  boundedOutcomeSnapshot,
   boundedRequestSnapshot,
   clipText,
+  fallbackOutcomeLine,
   fallbackRequestLine,
   latestAssistantText,
   latestRequestSnapshot,
@@ -56,9 +58,20 @@ test("bounds context fields and keeps both ends of long text", () => {
   assert.equal(bounded.previousRequest.length, 240);
   assert.equal(bounded.priorAssistant.length, 2_000);
   assert.equal(bounded.userInput.length, 1_000);
+
+  const outcome = boundedOutcomeSnapshot({
+    request: "r".repeat(300),
+    assistant: "a".repeat(2_500),
+  });
+  assert.equal(outcome.request.length, 240);
+  assert.equal(outcome.assistant.length, 2_000);
 });
 
-test("provides a compact deterministic fallback", () => {
+test("provides compact deterministic fallbacks", () => {
   assert.equal(fallbackRequestLine("  yes\nplease  "), "yes please");
   assert.equal(fallbackRequestLine(""), "Sent a request");
+  assert.equal(
+    fallbackOutcomeLine("  Added tests.\nAll checks pass.  "),
+    "Added tests. All checks pass.",
+  );
 });
