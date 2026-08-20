@@ -64,7 +64,7 @@ Pi lifecycle events  ──► deterministic state reducer  ──► activity l
 
 ### 1. Request line: one cheap, contextual model call
 
-Trigger interpretation once for each accepted interactive/RPC user input. The
+Trigger interpretation once for each accepted interactive TUI user input. The
 `input` event records the raw text and source; `before_agent_start` confirms
 that Pi accepted it and starts the nested completion without blocking the main
 agent. On startup/resume, at most one reconstruction call may use the latest
@@ -83,7 +83,9 @@ configured provider still receives that small clipped field. Ask for one short
 line with no label. This gives the model enough context to turn `yes` into a
 useful statement without transmitting the whole session.
 
-V1 uses one explicitly configured `provider/model` with reasoning disabled.
+V1 uses one explicitly configured `provider/model` and does not request a
+reasoning level. Users should choose a non-reasoning model because custom or
+always-reasoning providers may still apply their own default.
 If it is absent or unauthenticated, display a deterministic, clipped form of
 the user's input. Do not auto-select another provider and never fall back
 silently to the potentially expensive foreground model.
@@ -110,7 +112,7 @@ Initial status vocabulary:
 | Several concurrent tools | Primary category plus `+ N other tools` |
 | Tool batch ended, agent still active | `Reviewing results` |
 | Compaction starts | `Compacting context` |
-| A follow-up exists | Add `follow-up queued` (Pi exposes a boolean, not a count) |
+| Steering or a follow-up exists | Add `message queued` (Pi exposes a boolean, not a count) |
 | `agent_settled` and `ctx.isIdle()` | `Done — waiting for you` |
 | Unknown tool | `Running <tool name>` |
 
@@ -209,8 +211,8 @@ Resolved changes:
 - Start once per accepted input, latest-wins; do not delay calls by three
   seconds or refresh again after settlement.
 - Omit custom-entry persistence and transcript fingerprints in V1.
-- Use the boolean text `follow-up queued`; Pi does not expose a queued-message
-  count.
+- Use the boolean text `message queued`; Pi does not expose a queued-message
+  count or enough public detail to distinguish every queued state later.
 - Keep the widget plain and width-safe; omit animation, borders, and decoy-row
   work.
 - Fold diagnostic logging into implementation rather than making it a separate
