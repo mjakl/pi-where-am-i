@@ -15,13 +15,6 @@
       "skillPath": "skills/github-create-pr/SKILL.md",
       "computedHash": "b1cebfdab171175527abfa8a560228e4b46190ed92d4b08d298e098941a93f88"
     },
-    "github-wait-for-codex-review": {
-      "source": "git@github.com:mjakl/skills.git",
-      "sourceUrl": "git@github.com:mjakl/skills.git",
-      "sourceType": "git",
-      "skillPath": "skills/github-wait-for-codex-review/SKILL.md",
-      "computedHash": "155f508f7368b7d185e577d4197435d4095b70979a99e9b74f450f4bc8db5f8a"
-    },
     "issues": {
       "source": "git@github.com:mjakl/skills.git",
       "sourceUrl": "git@github.com:mjakl/skills.git",
