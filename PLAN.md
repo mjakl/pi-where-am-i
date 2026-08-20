@@ -5,8 +5,8 @@
 Keep two short lines visible in each interactive Pi session:
 
 ```text
-You: Confirmed exploring existing Pi recap extensions and planning a minimal alternative
-Pi: Reviewing findings and preparing a recommendation
+👤 Confirmed exploring existing Pi recap extensions and planning a minimal alternative
+🤖 Reviewing findings and preparing a recommendation
 ```
 
 The first line interprets the latest user input in conversation context. The
@@ -131,6 +131,8 @@ continues to emit lifecycle events.
 - Do not stream nested-model tokens into the widget.
 - Use one plain, borderless component factory whose `render(width)` returns
   exactly two lines clipped with Pi TUI width utilities.
+- Prefix the human and agent rows with `👤` and `🤖`; support explicit `H` and
+  `A` fallback markers for terminals without suitable emoji fonts.
 - Use a unique widget key and clear it during `session_shutdown`.
 - Treat “always visible” as a TUI-only V1 guarantee. RPC ignores component
   factories, while print/JSON modes have no persistent terminal UI.

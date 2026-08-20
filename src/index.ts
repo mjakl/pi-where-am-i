@@ -181,6 +181,7 @@ export function registerWhereAmIExtension(
         activity: describeActivity(nextRuntime.activity),
       }),
       options.scheduler,
+      nextRuntime.config.icons ?? "emoji",
     );
     runtime = nextRuntime;
 

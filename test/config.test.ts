@@ -37,6 +37,17 @@ test("accepts one explicit provider and model id", () => {
   });
 });
 
+test("accepts emoji or ASCII icon styles", () => {
+  assert.deepEqual(parseWhereAmIConfig({ icons: "ascii" }), {
+    config: { icons: "ascii" },
+    errors: [],
+  });
+  assert.deepEqual(parseWhereAmIConfig({ icons: "unsupported" }), {
+    config: {},
+    errors: ['icons must be either "emoji" or "ascii".'],
+  });
+});
+
 test("reports malformed model configuration", () => {
   assert.deepEqual(parseWhereAmIConfig({ model: { provider: "openrouter" } }), {
     config: {},

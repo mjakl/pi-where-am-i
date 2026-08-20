@@ -14,16 +14,27 @@ const plainTheme = {
   fg: (_color: string, text: string) => text,
 } as Theme;
 
-test("renders exactly two width-safe lines", () => {
+test("renders exactly one width-safe line per type", () => {
   const lines = renderWhereAmILines({
-    request: "Asked to explore a deliberately long implementation detail",
-    activity: "Exploring the codebase",
+    request: "Asked to explore a deliberately long\nimplementation detail",
+    activity: "Exploring\r\nthe codebase",
   }, 24, plainTheme);
 
   assert.equal(lines.length, 2);
   assert.ok(lines.every((line) => visibleWidth(line) <= 24));
-  assert.match(lines[0] ?? "", /^You:/);
-  assert.match(lines[1] ?? "", /^Pi:/);
+  assert.ok(lines.every((line) => !/[\r\n]/.test(line)));
+  assert.match(lines[0] ?? "", /^👤 /);
+  assert.match(lines[1] ?? "", /^🤖 /);
+});
+
+test("supports one-character ASCII icons", () => {
+  const lines = renderWhereAmILines({
+    request: "Review the change",
+    activity: "Running tests",
+  }, 24, plainTheme, "ascii");
+
+  assert.match(lines[0] ?? "", /^H /);
+  assert.match(lines[1] ?? "", /^A /);
 });
 
 test("coalesces renders while retaining a trailing update", () => {

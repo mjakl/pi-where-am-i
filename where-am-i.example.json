@@ -2,5 +2,6 @@
   "model": {
     "provider": "your-provider",
     "id": "your-cheap-text-model"
-  }
+  },
+  "icons": "emoji"
 }

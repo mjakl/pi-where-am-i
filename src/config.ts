@@ -8,8 +8,11 @@ export interface InterpreterModelConfig {
   id: string;
 }
 
+export type IconStyle = "emoji" | "ascii";
+
 export interface WhereAmIConfig {
   model?: InterpreterModelConfig;
+  icons?: IconStyle;
 }
 
 export interface LoadedWhereAmIConfig {
@@ -30,18 +33,29 @@ export function parseWhereAmIConfig(value: unknown): LoadedWhereAmIConfig {
     return { config: {}, errors: ["Expected a JSON object."] };
   }
 
-  if (value.model === undefined) return { config: {}, errors: [] };
-  if (!isRecord(value.model)) {
-    return { config: {}, errors: ["model must be an object with provider and id strings."] };
+  const config: WhereAmIConfig = {};
+  const errors: string[] = [];
+
+  if (value.model !== undefined) {
+    if (!isRecord(value.model)) {
+      errors.push("model must be an object with provider and id strings.");
+    } else {
+      const provider = typeof value.model.provider === "string" ? value.model.provider.trim() : "";
+      const id = typeof value.model.id === "string" ? value.model.id.trim() : "";
+      if (!provider || !id) {
+        errors.push("model.provider and model.id are required strings.");
+      } else {
+        config.model = { provider, id };
+      }
+    }
   }
 
-  const provider = typeof value.model.provider === "string" ? value.model.provider.trim() : "";
-  const id = typeof value.model.id === "string" ? value.model.id.trim() : "";
-  if (!provider || !id) {
-    return { config: {}, errors: ["model.provider and model.id are required strings."] };
+  if (value.icons !== undefined) {
+    if (value.icons === "emoji" || value.icons === "ascii") config.icons = value.icons;
+    else errors.push('icons must be either "emoji" or "ascii".');
   }
 
-  return { config: { model: { provider, id } }, errors: [] };
+  return { config, errors };
 }
 
 export function loadWhereAmIConfig(): LoadedWhereAmIConfig {

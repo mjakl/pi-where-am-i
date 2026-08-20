@@ -1,6 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 
+import type { IconStyle } from "./config.js";
 import { normalizeOneLine } from "./conversation.js";
 
 export const WHERE_AM_I_WIDGET_ID = "pi-where-am-i";
@@ -58,17 +59,23 @@ export class RenderThrottle {
   }
 }
 
-export function renderWhereAmILines(view: WhereAmIView, width: number, theme: Theme): string[] {
+export function renderWhereAmILines(
+  view: WhereAmIView,
+  width: number,
+  theme: Theme,
+  iconStyle: IconStyle = "emoji",
+): string[] {
   if (width <= 0) return ["", ""];
 
   const request = normalizeOneLine(view.request) || "No request yet";
   const activity = normalizeOneLine(view.activity) || "Idle — waiting for you";
-  const youLine = `${theme.fg("muted", "You:")} ${theme.fg("text", request)}`;
-  const piLine = `${theme.fg("muted", "Pi:")} ${theme.fg("text", activity)}`;
+  const [humanIcon, agentIcon] = iconStyle === "ascii" ? ["H", "A"] : ["👤", "🤖"];
+  const humanLine = `${theme.fg("muted", humanIcon)} ${theme.fg("text", request)}`;
+  const agentLine = `${theme.fg("muted", agentIcon)} ${theme.fg("text", activity)}`;
 
   return [
-    truncateToWidth(youLine, width, ""),
-    truncateToWidth(piLine, width, ""),
+    truncateToWidth(humanLine, width, ""),
+    truncateToWidth(agentLine, width, ""),
   ];
 }
 
@@ -81,6 +88,7 @@ export function setupWhereAmIWidget(
   context: ExtensionContext,
   getView: () => WhereAmIView,
   scheduler: Scheduler = DEFAULT_SCHEDULER,
+  iconStyle: IconStyle = "emoji",
 ): WidgetController {
   if (context.mode !== "tui") {
     return { requestRender() {}, dispose() {} };
@@ -99,7 +107,7 @@ export function setupWhereAmIWidget(
     (nextTui, theme) => {
       tui = nextTui;
       const component: Component & { dispose(): void } = {
-        render: (width) => renderWhereAmILines(committedView, width, theme),
+        render: (width) => renderWhereAmILines(committedView, width, theme, iconStyle),
         invalidate() {},
         dispose() {
           if (tui === nextTui) tui = null;

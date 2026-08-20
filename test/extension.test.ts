@@ -95,17 +95,23 @@ function createHarness(options: { config?: any; interpreter?: any } = {}) {
   };
 }
 
+test("uses ASCII icons when configured", async () => {
+  const harness = createHarness({ config: { icons: "ascii" } });
+  await harness.run("session_start");
+  assert.deepEqual(harness.lines(), ["H No request yet", "A Idle — waiting for you"]);
+});
+
 test("tracks request, parallel tools, settlement, and shutdown", async () => {
   const harness = createHarness();
   await harness.run("session_start");
-  assert.deepEqual(harness.lines(), ["You: No request yet", "Pi: Idle — waiting for you"]);
+  assert.deepEqual(harness.lines(), ["👤 No request yet", "🤖 Idle — waiting for you"]);
 
   await harness.run("input", {
     text: "please run the tests",
     source: "interactive",
   });
   await harness.run("before_agent_start");
-  assert.deepEqual(harness.lines(), ["You: please run the tests", "Pi: Starting"]);
+  assert.deepEqual(harness.lines(), ["👤 please run the tests", "🤖 Starting"]);
 
   await harness.run("agent_start");
   await harness.run("tool_execution_start", {
@@ -119,18 +125,18 @@ test("tracks request, parallel tools, settlement, and shutdown", async () => {
     args: { command: "npm test" },
   });
   assert.deepEqual(harness.lines(), [
-    "You: please run the tests",
-    "Pi: Running tests + 1 other tool",
+    "👤 please run the tests",
+    "🤖 Running tests + 1 other tool",
   ]);
 
   await harness.run("tool_execution_end", { toolCallId: "test-1" });
-  assert.equal(harness.lines()[1], "Pi: Exploring the codebase");
+  assert.equal(harness.lines()[1], "🤖 Exploring the codebase");
 
   await harness.run("agent_end");
-  assert.equal(harness.lines()[1], "Pi: Reviewing results");
+  assert.equal(harness.lines()[1], "🤖 Reviewing results");
 
   await harness.run("agent_settled");
-  assert.equal(harness.lines()[1], "Pi: Done — waiting for you");
+  assert.equal(harness.lines()[1], "🤖 Done — waiting for you");
 
   await harness.run("session_shutdown");
   assert.equal(harness.widgetCleared, true);
@@ -147,8 +153,8 @@ test("shows a queued follow-up without replacing current work", async () => {
   });
 
   assert.deepEqual(harness.lines(), [
-    "You: yes, do that too",
-    "Pi: Thinking / preparing next step; message queued",
+    "👤 yes, do that too",
+    "🤖 Thinking / preparing next step; message queued",
   ]);
 });
 
@@ -165,12 +171,12 @@ test("starts remote interpretation only after idle input is accepted", async () 
 
   await harness.run("input", { text: "yes", source: "interactive" });
   assert.deepEqual(calls, []);
-  assert.equal(harness.lines()[0], "You: No request yet");
+  assert.equal(harness.lines()[0], "👤 No request yet");
 
   await harness.run("before_agent_start");
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, ["yes"]);
-  assert.equal(harness.lines()[0], "You: Confirmed the accepted request");
+  assert.equal(harness.lines()[0], "👤 Confirmed the accepted request");
 });
 
 test("starts queued interpretation when Pi delivers the user message", async () => {
@@ -197,7 +203,7 @@ test("starts queued interpretation when Pi delivers the user message", async () 
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, ["yes, do that too"]);
-  assert.equal(harness.lines()[0], "You: Confirmed queued work");
+  assert.equal(harness.lines()[0], "👤 Confirmed queued work");
   assert.doesNotMatch(harness.lines()[1] ?? "", /queued/);
 });
 
@@ -229,7 +235,7 @@ test("aborts and discards superseded interpretations", async () => {
   pending[1]?.resolve("New interpretation");
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(harness.lines()[0], "You: New interpretation");
+  assert.equal(harness.lines()[0], "👤 New interpretation");
 });
 
 test("aborts interpretation and rolls back status when compaction is aborted", async () => {
@@ -246,12 +252,12 @@ test("aborts interpretation and rolls back status when compaction is aborted", a
   await harness.run("input", { text: "continue", source: "interactive" });
   await harness.run("before_agent_start");
   await harness.run("agent_start");
-  assert.equal(harness.lines()[1], "Pi: Thinking / preparing next step");
+  assert.equal(harness.lines()[1], "🤖 Thinking / preparing next step");
 
   await harness.run("session_before_compact", { signal: compaction.signal });
   assert.equal(interpretationSignal?.aborted, true);
-  assert.equal(harness.lines()[1], "Pi: Compacting context");
+  assert.equal(harness.lines()[1], "🤖 Compacting context");
 
   compaction.abort();
-  assert.equal(harness.lines()[1], "Pi: Thinking / preparing next step");
+  assert.equal(harness.lines()[1], "🤖 Thinking / preparing next step");
 });

@@ -5,8 +5,8 @@
 `pi-where-am-i` keeps two compact lines above Pi's editor:
 
 ```text
-You: Confirmed exploring the tokenizer as well as the parser
-Pi: Exploring the codebase + 1 other tool
+👤 Confirmed exploring the tokenizer as well as the parser
+🤖 Exploring the codebase + 1 other tool
 ```
 
 It is designed for working in several terminals at once, where returning to a
@@ -68,7 +68,8 @@ instead.
   "model": {
     "provider": "your-provider",
     "id": "your-cheap-text-model"
-  }
+  },
+  "icons": "emoji"
 }
 ```
 
@@ -79,6 +80,10 @@ opt into reasoning, disables retries and prompt-cache retention, emits at most
 
 Copy [`where-am-i.example.json`](where-am-i.example.json) as a starting point.
 Invalid configuration produces a warning and uses the local fallback.
+
+Emoji icons are the default. Set `"icons": "ascii"` to use the one-character
+markers `H` and `A` when the terminal font cannot display emoji. Terminal font
+support cannot be detected reliably, so the fallback is explicit.
 
 ## What the model sees
 
@@ -122,6 +127,18 @@ Unknown tools appear as `Running <tool name>`. Concurrent work adds a compact
 This is intentionally an observable status, not a semantic guess. Pi cannot
 keep reporting a detached process after the responsible tool stops emitting
 lifecycle events.
+
+## Fixed-height rendering
+
+The widget always returns exactly two rows: one human row and one agent row.
+Embedded newlines are collapsed to spaces, and each row is truncated to the
+available display width before Pi renders it. Its height therefore cannot grow
+when a model returns a multi-line note or when the terminal narrows.
+
+Pi places above-editor widgets in its fixed dock and adds one standard spacer
+above that container. In fullscreen mode, extra widget rows reduce the
+transcript viewport; changing widget height can therefore appear to push the
+screen. This extension keeps its own contribution fixed at two rows.
 
 ## Scope
 
