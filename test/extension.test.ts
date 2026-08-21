@@ -32,6 +32,8 @@ function createHarness(options: {
   const handlers = new Map<string, Handler>();
   let widgetFactory: WidgetFactory | undefined;
   let widgetCleared = false;
+  let widgetInstalls = 0;
+  let notifications = 0;
   let renderRequests = 0;
   const entries: unknown[] = [];
   const theme = { fg: (_color: string, text: string) => text };
@@ -50,12 +52,13 @@ function createHarness(options: {
       buildContextEntries: () => entries,
     },
     ui: {
-      notify() {},
+      notify() { notifications += 1; },
       setWidget: (_key: string, content: WidgetFactory | undefined) => {
         if (content === undefined) {
           widgetCleared = true;
           widgetFactory = undefined;
         } else {
+          widgetInstalls += 1;
           widgetFactory = content;
         }
       },
@@ -95,10 +98,63 @@ function createHarness(options: {
     handlers,
     lines,
     run,
+    get notifications() { return notifications; },
     get renderRequests() { return renderRequests; },
     get widgetCleared() { return widgetCleared; },
+    get widgetInstalls() { return widgetInstalls; },
   };
 }
+
+test("does nothing outside TUI mode and disposes a prior TUI runtime", async () => {
+  let interpretationCalls = 0;
+  const harness = createHarness({
+    config: { model: { provider: "test", id: "cheap" } },
+    interpreter: async () => {
+      interpretationCalls += 1;
+      return "Should not run";
+    },
+    outcomeInterpreter: async () => {
+      interpretationCalls += 1;
+      return "Should not run";
+    },
+  });
+
+  await harness.run("session_start");
+  assert.equal(harness.widgetInstalls, 1);
+
+  for (const mode of ["rpc", "json", "print"]) {
+    harness.context.mode = mode;
+    await harness.run("session_start");
+    for (const [name] of harness.handlers) {
+      if (name !== "session_start") await harness.run(name);
+    }
+  }
+
+  assert.equal(harness.widgetCleared, true);
+  assert.equal(harness.widgetInstalls, 1);
+  assert.equal(harness.notifications, 0);
+  assert.equal(interpretationCalls, 0);
+});
+
+test("does not read configuration while starting a non-TUI session", async () => {
+  const handlers = new Map<string, Handler>();
+  let configReads = 0;
+  const options = Object.defineProperty({}, "config", {
+    get() {
+      configReads += 1;
+      return { icons: "ascii" };
+    },
+  });
+
+  registerWhereAmIExtension({
+    on: (name: string, handler: Handler) => handlers.set(name, handler),
+  } as any, options);
+
+  const sessionStart = handlers.get("session_start");
+  assert.ok(sessionStart);
+  await sessionStart({}, { mode: "rpc" });
+  assert.equal(configReads, 0);
+});
 
 test("uses ASCII icons when configured", async () => {
   const harness = createHarness({ config: { icons: "ascii" } });

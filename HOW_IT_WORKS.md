@@ -107,8 +107,8 @@ it remains visible when:
 
 Background interpretation failures are intentionally silent because the local
 label is already valid. Configuration parse errors are different: they produce
-a Pi warning during `session_start`. Outside TUI mode, the extension still
-computes local request state but installs no widget and makes no model call.
+a Pi warning during a TUI `session_start`. In RPC, JSON, and print modes, session
+startup returns before it reads configuration or creates runtime state.
 
 ### Model call
 

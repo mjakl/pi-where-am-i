@@ -322,7 +322,11 @@ export function registerWhereAmIExtension(
   let runtime: Runtime | null = null;
 
   pi.on("session_start", (_event, context) => {
-    if (runtime) disposeRuntime(runtime);
+    if (runtime) {
+      disposeRuntime(runtime);
+      runtime = null;
+    }
+    if (context.mode !== "tui") return;
 
     const loaded = options.config
       ? { config: options.config, errors: [] }
