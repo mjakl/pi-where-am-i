@@ -1,10 +1,10 @@
 ---
-name: github-create-pr
+name: create-github-pr
 description: Use when the user asks to open, draft, or submit a GitHub pull request from the current branch. Do not use for reviewing or monitoring an existing pull request.
 compatibility: Requires Git and GitHub CLI (gh), authenticated for the target GitHub host.
 ---
 
-# GitHub Create Pull Request
+# Create GitHub Pull Request
 
 Create one pull request and stop. Do not start an automated review workflow.
 

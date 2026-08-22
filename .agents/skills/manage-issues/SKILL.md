@@ -1,10 +1,10 @@
 ---
-name: issues
+name: manage-issues
 description: Use when the user asks to read or assess one GitHub issue, or to draft, create, update, comment on, label, or close a PR-sized GitHub issue. Do not use for a multi-PR initiative map, repository-local tk tickets, or a local task queue.
 compatibility: Requires Git, an authenticated GitHub CLI (`gh`), network access to GitHub, and issue access in the target repository.
 ---
 
-# Issues
+# Manage Issues
 
 Manage durable GitHub change requests. Bound each issue to one coherent pull request. Follow repository instructions and issue templates before this skill's defaults.
 

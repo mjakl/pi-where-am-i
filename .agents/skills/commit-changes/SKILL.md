@@ -1,10 +1,10 @@
 ---
-name: git-commit
+name: commit-changes
 description: Use when the user asks to commit current changes or wants help writing a commit message. Do not use to resolve or continue a conflicted merge, rebase, cherry-pick, or revert.
 compatibility: Requires Git.
 ---
 
-# Git Commit
+# Commit Changes
 
 First determine the requested result:
 
