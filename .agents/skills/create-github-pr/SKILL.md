@@ -72,7 +72,7 @@ Use this order of precedence:
 3. The style of recent pull requests in the target repository
 4. The fallback below
 
-If several templates exist, choose the one that matches the change. Ask when the choice is unclear.
+If several templates exist, choose the one that matches the change. Ask when the choice is unclear. Preserve required headings and checkbox structure. Use `N/A` only for a required field that is genuinely inapplicable.
 
 Fallback body:
 

@@ -22,6 +22,8 @@ Manage durable GitHub change requests. Bound each issue to one coherent pull req
 
 1. Resolve the target repository from the user's request or the current Git remote.
 2. Read project instructions and relevant files under `.github/ISSUE_TEMPLATE/`.
+   - For a YAML issue form, preserve required fields, allowed options, title prefixes, labels, and field order. Ask only for required information that is missing.
+   - If a required confirmation asserts that a check was performed, perform the safe read-only check or ask the user; do not mark it complete without evidence.
 3. Verify the repository and authentication with read-only `gh` commands.
 4. Preserve the user's intended repository when the current directory points elsewhere.
 
@@ -55,6 +57,8 @@ Use the repository's issue template when one fits. Otherwise, use this minimal s
 - <Observable result>
 ```
 
+For a bug without a matching repository template, include reproduction steps, expected and actual behavior, environment or version, and relevant logs when known.
+
 Add only the sections that help:
 
 - **Scope and non-goals** when the boundary is easy to misunderstand;
@@ -78,10 +82,10 @@ Show the final title and body before creation. Let the user revise them.
 Before every mutation, show the exact proposed operation and wait for confirmation.
 
 - Create with `gh issue create` only after the final draft is confirmed.
-- For an edit, show the complete field or body change and wait before applying it.
+- For an edit, fetch the current issue first, then show the complete field or body change and preserve every field the user did not authorize changing. Wait before applying it.
 - For a comment, show the final text. Preserve the user's meaning and identify when the comment is AI-authored if project policy requires it.
 - For labels, inspect available labels first and show the exact additions and removals.
-- For close or reopen, state the resulting issue state and reason.
+- For close or reopen, state the resulting issue state and reason. Before proposing closure as fixed, duplicate, or out of scope, verify and cite the fixing pull request or commit, original issue, or repository policy. If the evidence is unavailable, state that and do not invent it.
 - Use a temporary body file when multiline shell quoting would be fragile. Remove it afterward.
 
 After mutation, fetch the issue again and verify the intended state. Report the issue URL and the operation completed.

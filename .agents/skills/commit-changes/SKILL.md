@@ -13,7 +13,7 @@ First determine the requested result:
 
 A request for message help does not authorize staging, committing, or pushing.
 
-When creating a commit, preserve unrelated work and stop after the local commit unless the user also asks you to push.
+When creating a commit, preserve unrelated work.
 
 ## Workflow
 
@@ -34,9 +34,9 @@ git log -5 --format='%h %s'
 
 Before staging, use Git status and repository state to detect an in-progress merge, rebase, cherry-pick, or revert. Check the paths returned by `git rev-parse --git-path <name>` for `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge`, `rebase-apply`, and `sequencer`. If any such operation is active, stop the ordinary commit workflow even when all conflicts appear resolved. Report the operation and whether unmerged paths remain. Operation-specific resolution or continuation requires its own authorization and workflow.
 
-Identify the exact changes that belong in the commit. Do not include unrelated staged, unstaged, or untracked files.
+Identify the exact changes that belong in the commit. Treat user-supplied paths or globs as scope limits and other supplied text as commit-message guidance. Verify all staged changes against that scope rather than assuming staged state expresses intent. Do not include unrelated staged, unstaged, or untracked files.
 
-If the intended scope is unclear, stop and ask the user.
+If staged content conflicts with the supplied scope or the intended change remains unclear, stop and ask the user.
 
 ### 3. Validate the change
 
@@ -56,9 +56,13 @@ git diff --cached --stat
 git diff --cached
 ```
 
+Check the staged paths and diff for likely secrets, accidental debug output, and unrelated formatting churn. Do not print suspected secret values.
+
 Do not create an empty commit unless the user explicitly asks for one.
 
 ### 5. Write the message
+
+Describe the staged change as one coherent “what and why.” If that is not possible, reconsider the scope or ask the user; do not silently create several commits.
 
 Use this order of precedence:
 
